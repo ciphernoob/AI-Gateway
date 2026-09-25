@@ -1,0 +1,11 @@
+.git
+.env
+.runtime
+**/__pycache__
+test-results
+*.db
+.admin
+**/.cache
+**/node_modules
+admin/web/test-results
+admin/web/playwright-report

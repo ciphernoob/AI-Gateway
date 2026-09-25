@@ -1,0 +1,40 @@
+services:
+  config:
+    command: [python, -m, scripts.admin_bootstrap]
+  gateway:
+    build: {context: ., dockerfile: admin/Dockerfile.gateway}
+    environment:
+      ADMIN_INTERNAL_TOKEN_FILE: /secrets/ADMIN_INTERNAL_TOKEN
+    volumes:
+      - runtime:/runtime
+      - admin-logs:/logs
+      - ./.admin/secrets/ADMIN_INTERNAL_TOKEN:/secrets/ADMIN_INTERNAL_TOKEN:ro
+    stop_grace_period: 45s
+  audit-store:
+    environment:
+      ADMIN_INTERNAL_TOKEN_FILE: /secrets/ADMIN_INTERNAL_TOKEN
+    volumes:
+      - ./.admin/secrets/ADMIN_INTERNAL_TOKEN:/secrets/ADMIN_INTERNAL_TOKEN:ro
+  admin:
+    build: {context: ., dockerfile: admin/Dockerfile}
+    env_file: .env
+    environment:
+      ADMIN_USERNAME: admin
+      ADMIN_IMPORT: /config/gateway.yaml
+    ports: ['0.0.0.0:${ADMIN_PORT:-8443}:8443']
+    depends_on:
+      gateway: {condition: service_healthy}
+    volumes:
+      - admin-data:/data
+      - runtime:/runtime
+      - admin-logs:/logs:ro
+      - ./config/gateway.example.yaml:/config/gateway.yaml:ro
+      - ./.admin/secrets:/secrets:ro
+      - ./.admin/certs:/certs:ro
+    healthcheck:
+      test: [CMD, python, -c, "import ssl,urllib.request; urllib.request.urlopen('https://localhost:8443/', context=ssl._create_unverified_context(),timeout=3)"]
+      interval: 5s
+      retries: 20
+volumes:
+  admin-data:
+  admin-logs:

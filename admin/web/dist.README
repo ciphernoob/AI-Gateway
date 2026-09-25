@@ -1,0 +1,3 @@
+Vue 静态资源由 npm run build 输出到 dist/，不提交构建产物。
+此文件使尚未构建 Vue 时也可编译 Go 单元测试与 init-secrets 工具。
+管理服务器启动必须具有构建好的 dist/index.html。

@@ -1,0 +1,71 @@
+name: ai-gateway
+services:
+  config:
+    build: {context: ., dockerfile: services/Dockerfile}
+    env_file: .env
+    command: [python, -m, scripts.validate_config, /config/gateway.yaml, --output, /runtime/config.json]
+    volumes:
+      - ./config/gateway.example.yaml:/config/gateway.yaml:ro
+      - runtime:/runtime
+  redis:
+    image: public.ecr.aws/docker/library/redis:7.4.2-alpine@sha256:02419de7eddf55aa5bcf49efb74e88fa8d931b4d77c07eff8a6b2144472b6952
+    env_file: .env
+    command: [sh, -c, 'exec redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy noeviction --requirepass "$$REDIS_PASSWORD"']
+    volumes: [redis-data:/data]
+    healthcheck:
+      test: [CMD-SHELL, 'REDISCLI_AUTH="$$REDIS_PASSWORD" redis-cli ping | grep -q PONG']
+      interval: 2s
+      retries: 20
+  mock-a:
+    build: {context: ., dockerfile: services/Dockerfile}
+    env_file: .env
+    environment: {MOCK_NAME: mock-a, MOCK_KEY_ENV: PROVIDER_KEY_A}
+    command: [python, -m, tests.mock_provider.server, --port, '8000']
+  mock-b:
+    build: {context: ., dockerfile: services/Dockerfile}
+    env_file: .env
+    environment: {MOCK_NAME: mock-b, MOCK_KEY_ENV: PROVIDER_KEY_B}
+    command: [python, -m, tests.mock_provider.server, --port, '8000']
+  audit-store:
+    build: {context: ., dockerfile: services/Dockerfile}
+    env_file: .env
+    command: [python, -m, services.audit_store.server, --config, /runtime/config.json, --database, /data/audit.db, --port, '8001']
+    depends_on:
+      config: {condition: service_completed_successfully}
+    volumes: [runtime:/runtime:ro, audit-data:/data]
+  gateway:
+    build: .
+    ports: ['127.0.0.1:${GATEWAY_PORT:-8080}:8080']
+    depends_on:
+      config: {condition: service_completed_successfully}
+      redis: {condition: service_healthy}
+      mock-a: {condition: service_started}
+      mock-b: {condition: service_started}
+      audit-store: {condition: service_started}
+    volumes: [runtime:/runtime:ro]
+    healthcheck:
+      test: [CMD, curl, --fail, --silent, http://localhost:8080/readyz]
+      interval: 3s
+      retries: 20
+  prometheus:
+    image: prom/prometheus:v3.2.1
+    profiles: [monitoring]
+    volumes: ['./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro']
+  test:
+    build: {context: ., dockerfile: services/Dockerfile}
+    profiles: [test]
+    env_file: .env
+    environment: {RUN_INTEGRATION: '1'}
+    volumes: ['.:/app:ro', 'runtime:/runtime:ro']
+    command: [python, -m, unittest, discover, -s, tests, -v]
+  grafana:
+    image: grafana/grafana:11.6.0
+    profiles: [monitoring]
+    ports: ['127.0.0.1:3000:3000']
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+volumes:
+  runtime:
+  redis-data:
+  audit-data:

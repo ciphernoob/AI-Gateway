@@ -1,0 +1,16 @@
+name: gateway-tests
+on: [push, pull_request]
+jobs:
+  acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash scripts/test.sh
+      - if: always()
+        run: docker compose -p ai-gateway-test logs --no-color > test-results.log
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gateway-test-logs
+          path: test-results.log

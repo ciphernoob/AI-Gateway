@@ -1,0 +1,47 @@
+schema: spec-driven
+
+context: |
+  Language: zh-CN
+  All artifacts must be written in zh-CN.
+  Keep OpenSpec structural headings and SHALL/MUST keywords in English.
+  Greenfield lightweight AI Gateway on OpenResty: Lua policies, native Nginx proxying,
+  standalone Redis accounting, Prometheus metrics and Grafana dashboards.
+  MVP M0-M4: API Key identity, OpenAI-compatible Chat Completions (JSON and SSE),
+  model registry, conservative fallback, shared Usage Collector, monetary budgets,
+  plus opt-in structured quota-exhaustion fallback to a different configured Key/model
+  before client output; this option defaults off and does not retry ordinary rate limits.
+  per-user daily/monthly Token statistics and authenticated GET /v1/usage.
+  Include an independent Audit & Trace module in M4: request/response content,
+  SSE reconstruction, tool-call instructions, authenticated Agent execution events,
+  user-scoped query and content retention. Its contract lives in gateway-observability.
+  Default audit mode is full with sampling rate 1; redact credentials before storage.
+  Keep content out of operational logs, metrics and Redis. Use an internal Audit Store
+  with SQLite on a persistent volume; store metadata and payloads separately.
+  Gateway-observed and Agent-reported events must be distinguishable.
+  Audit data is not a billing source. Partial, truncated or missing capture is explicit.
+  Budget Engine uses integer monetary units, independent of User Quota Token counters.
+  Token hard enforcement, quota reservation, intelligent routing and
+  non-OpenAI native protocol conversion remain outside the original MVP.
+  Separate change gateway-admin-console adds Go HTTPS 8443 + Vue administration,
+  versioned configuration publication, model-specific URLs, users/keys management,
+  administrator audit queries and ledger-backed usage. Original MVP tasks remain separate.
+  Identity is derived from Gateway API Key; request user_id/agent_id is never trusted.
+  Missing usage is unknown, never zero; each upstream attempt has a unique attempt_id.
+  Do not perform Redis cosocket I/O in balancer, body_filter or log phases.
+  Use timezone Asia/Shanghai for accounting; pin periods at attempt start.
+  Initial environment: Windows PowerShell, Node and Python available; Docker not found
+  on PATH at initialization. Runtime and integration tests target Linux containers.
+
+rules:
+  proposal:
+    - Separate MVP scope and future M5 work explicitly.
+  specs:
+    - Every requirement needs observable acceptance scenarios using WHEN and THEN.
+    - Cover authentication, concurrency, retries, missing usage and dependency failures.
+  design:
+    - Document Nginx phase constraints, accounting consistency and recovery limitations.
+    - Distinguish observed environment facts from proposed implementation decisions.
+  tasks:
+    - Group tasks by M0 through M4 and map each group to capabilities and verification.
+    - Keep M5 out of the MVP completion checklist.
+    - Never mark implementation or tests complete based on planning artifacts alone.

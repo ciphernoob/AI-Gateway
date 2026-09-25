@@ -1,0 +1,98 @@
+version: 1
+fallback:
+  on_key_quota_exhausted: false
+timezone: Asia/Shanghai
+plugins:
+  identity: true
+  unified_api: true
+  fallback: true
+  usage_collector: true
+  budget: true
+  user_quota: true
+  observability: true
+  audit: true
+request:
+  max_bytes: 1048576
+  max_attempts: 2
+  connect_timeout_ms: 1000
+  read_timeout_ms: 5000
+  total_timeout_ms: 30000
+  default_output_tokens: 256
+redis:
+  host: redis
+  port: 6379
+  timeout_ms: 1000
+  password_env: REDIS_PASSWORD
+  max_pending: 10000
+  recovery_interval: 2
+users:
+  user_001: {daily_token_limit: 50000, monthly_token_limit: 1000000}
+  user_002: {daily_token_limit: 100000, monthly_token_limit: 2000000}
+api_keys:
+  - key_env: GATEWAY_KEY_USER1
+    user_id: user_001
+    agent_id: agent_001
+    scopes: [chat:write, usage:read, audit:read, audit:write]
+  - key_env: GATEWAY_KEY_USER2
+    user_id: user_002
+    scopes: [chat:write, usage:read, audit:read]
+providers:
+  mock_a: {base_url: 'http://mock-a:8000', key_env: PROVIDER_KEY_A}
+  mock_b: {base_url: 'http://mock-b:8000', key_env: PROVIDER_KEY_B}
+models:
+  balanced:
+    candidates:
+      - &a
+        provider: mock_a
+        model: mock-model-a
+        context_tokens: 4096
+        max_output_tokens: 1024
+        n_max: 4
+        input_rate: 1000000
+        output_rate: 2000000
+        price_version: test-v1
+        capabilities: [stream, tools]
+        supports_stream_usage: true
+      - &b
+        provider: mock_b
+        model: mock-model-b
+        context_tokens: 4096
+        max_output_tokens: 1024
+        n_max: 4
+        input_rate: 1000000
+        output_rate: 2000000
+        price_version: test-v1
+        capabilities: [stream, tools]
+        supports_stream_usage: true
+  local:
+    candidates: [*b]
+budget:
+  currency: USD
+  epoch: mvp-v1
+  global_limit: 100000000
+  agent_limits: {agent_001: 50000000}
+  model_limits: {balanced: 50000000, local: 50000000}
+usage:
+  json_max_bytes: 4194304
+  sse_event_max_bytes: 262144
+  daily_retention_days: 35
+  monthly_retention_days: 400
+  dedupe_retention_days: 400
+  replay_max_days: 7
+audit:
+  mode: full
+  sample_rate: 1.0
+  policy_version: audit-v1
+  base_url: http://audit-store:8001
+  token_env: AUDIT_SERVICE_TOKEN
+  cursor_secret_env: AUDIT_CURSOR_SECRET
+  request_max_bytes: 1048576
+  response_max_bytes_per_attempt: 4194304
+  tool_event_max_bytes: 262144
+  queue_max_bytes: 67108864
+  queue_max_records: 256
+  retry_count: 5
+  content_retention_days: 7
+  metadata_retention_days: 30
+  start_failure_policy: reject
+  redact_fields: [password, api_key, authorization, cookie, secret, access_token]
