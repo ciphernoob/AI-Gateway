@@ -78,6 +78,21 @@ func number(v any) int64 {
 	return 0
 }
 func clone(v Obj) Obj { var out Obj; _ = json.Unmarshal(encode(v), &out); return out }
+func tokenOnlyDocument(d Document) Document {
+	delete(d.Config, "budget")
+	delete(object(d.Config["plugins"]), "budget")
+	for _, rawModel := range object(d.Config["models"]) {
+		model := object(rawModel)
+		candidates, _ := model["candidates"].([]any)
+		for _, rawCandidate := range candidates {
+			candidate := object(rawCandidate)
+			delete(candidate, "input_rate")
+			delete(candidate, "output_rate")
+			delete(candidate, "price_version")
+		}
+	}
+	return d
+}
 func secretFile(name string) (string, error) {
 	b, e := os.ReadFile(env(name+"_FILE", "/secrets/"+name))
 	if e != nil {
@@ -229,6 +244,7 @@ func (a *App) draft() (Document, int64, error) {
 	e := a.db.QueryRow("SELECT revision,document FROM draft WHERE id=1").Scan(&rev, &raw)
 	if e == nil {
 		e = json.Unmarshal([]byte(raw), &d)
+		d = tokenOnlyDocument(d)
 	}
 	return d, rev, e
 }
@@ -238,6 +254,7 @@ func (a *App) version(id string) (Document, error) {
 	e := a.db.QueryRow("SELECT document FROM versions WHERE id=?", id).Scan(&raw)
 	if e == nil {
 		e = json.Unmarshal([]byte(raw), &d)
+		d = tokenOnlyDocument(d)
 	}
 	return d, e
 }

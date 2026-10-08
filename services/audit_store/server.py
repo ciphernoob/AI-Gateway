@@ -78,8 +78,7 @@ class Handler(BaseHTTPRequestHandler):
                 status = 200
             else:
                 method = {"/internal/prepare": store.prepare, "/internal/attempt": store.attempt,
-                          "/internal/finish": store.finish, "/internal/usage": store.link_usage,
-                          "/internal/reconcile": store.reconcile}.get(route)
+                          "/internal/finish": store.finish, "/internal/usage": store.link_usage}.get(route)
                 require(method is not None, 404, "not_found")
                 result, status = method(identity, data), 200
             self.respond(status, result)

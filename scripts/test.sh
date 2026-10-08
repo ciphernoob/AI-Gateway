@@ -15,12 +15,12 @@ docker compose up -d --build --wait
 docker compose exec -T gateway openresty -p /app/ -c nginx/nginx.conf -t
 docker compose run --rm --build test python -m unittest discover -s tests -v
 docker compose exec -T gateway resty -I /app/lua /app/tests/lua/run.lua
-for variant in fallback both_down single_attempt budget_denied quota_exceeded metrics_off; do
+for variant in fallback both_down single_attempt quota_exceeded metrics_off; do
   docker compose run --rm config python -m scripts.config_variant "$variant"
   docker compose restart gateway
   docker compose run --rm test python -m scripts.fault_probe "$variant"
 done
-for variant in key_quota_off key_quota_on key_quota_same key_quota_single key_quota_budget key_quota_custom; do
+for variant in key_quota_off key_quota_on key_quota_same key_quota_single key_quota_custom; do
   docker compose run --rm config python -m scripts.config_variant "$variant"
   docker compose restart gateway
   docker compose run --rm test python -m tests.quota_switch "$variant"

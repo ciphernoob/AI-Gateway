@@ -1,0 +1,38 @@
+import {test,expect} from '@playwright/test'
+import {readFileSync} from 'node:fs'
+import {resolve} from 'node:path'
+
+test('管理员查看现有 Gateway Key 并清理明文',async({page,context})=>{
+ const root=resolve(process.cwd(),'../..')
+ await page.goto('/')
+ await page.getByLabel('密码',{exact:true}).fill(readFileSync(resolve(root,'.admin/secrets/ADMIN_PASSWORD'),'utf8').trim())
+ await page.getByRole('button',{name:'登录控制台'}).click()
+ await expect(page.getByRole('heading',{name:'服务概览'})).toBeVisible()
+ await page.getByRole('link',{name:'用户管理'}).click()
+ const view=page.getByRole('button',{name:'查看',exact:true}).first()
+ await expect(view).toBeVisible()
+ await page.clock.install()
+ await context.grantPermissions(['clipboard-read','clipboard-write'])
+ await view.click()
+ const dialog=page.getByRole('dialog',{name:'查看 Gateway Key',exact:true})
+ await expect(dialog).toBeVisible()
+ const key=(await dialog.locator('.revealed-key').innerText()).trim()
+ expect(key.length>=16).toBe(true)
+ await dialog.getByRole('button',{name:'复制 Key',exact:true}).click()
+ expect(await page.evaluate(async value=>(await navigator.clipboard.readText())===value,key)).toBe(true)
+ await page.evaluate(()=>navigator.clipboard.writeText(''))
+ expect(await page.evaluate(value=>JSON.stringify([localStorage,sessionStorage]).includes(value),key)).toBe(false)
+ await dialog.getByRole('button',{name:'Close this dialog'}).click()
+ await expect(page.locator('.revealed-key')).toHaveCount(0)
+ await view.click();await expect(dialog).toBeVisible()
+ await page.clock.fastForward(61000)
+ await expect(dialog).toBeHidden()
+ await expect(page.locator('.revealed-key')).toHaveCount(0)
+ await view.click();await expect(dialog).toBeVisible()
+ // Simulate navigation while the modal is open; a route watcher must clear it.
+ await page.getByRole('link',{name:'模型服务'}).evaluate((el:HTMLElement)=>el.click())
+ await expect(dialog).toBeHidden()
+ await page.getByRole('link',{name:'用户管理'}).click()
+ await expect(page.locator('.revealed-key')).toHaveCount(0)
+ await page.getByRole('button',{name:'退出登录'}).click()
+})

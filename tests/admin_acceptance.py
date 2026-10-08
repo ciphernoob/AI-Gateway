@@ -71,10 +71,8 @@ def draft():
 
 def settings(enabled):
     d = draft()
-    cfg = d['document']['config']
     status, result = call('/settings', {'revision': d['revision'], 'value': {'public_url': d['document']['public_url'],
-        'fallback': {'on_key_quota_exhausted': enabled}, 'global_limit': cfg['budget']['global_limit'],
-        'agent_limits': cfg['budget']['agent_limits']}}, 'PUT')
+        'fallback': {'on_key_quota_exhausted': enabled}}}, 'PUT')
     assert status == 200, result
     return result['revision']
 

@@ -221,7 +221,7 @@ func (s *eventWriter) line(line []byte) {
 	if json.Unmarshal(line[start:end+1], &event) != nil || event["event"] == nil {
 		return
 	}
-	allowed := strings.Fields("event request_id attempt_id trace_id user_id agent_id model actual_model provider price_version started_at finished_at prompt_tokens completion_tokens total_tokens usage_source usage_status status http_status cost_micro_usd reason from_attempt_id to_attempt_id from_provider to_provider from_model to_model from_key_ref to_key_ref error_code config_revision")
+	allowed := strings.Fields("event request_id attempt_id trace_id user_id agent_id model actual_model provider started_at finished_at prompt_tokens completion_tokens total_tokens usage_source usage_status status http_status reason from_attempt_id to_attempt_id from_provider to_provider from_model to_model from_key_ref to_key_ref error_code config_revision")
 	out := Obj{"time": time.Now().Unix()}
 	for _, k := range allowed {
 		if v, ok := event[k]; ok {

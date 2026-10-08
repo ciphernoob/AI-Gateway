@@ -5,12 +5,11 @@ local errors=require 'core.errors'
 local identity=require 'plugins.identity'
 local unified=require 'plugins.unified_api'
 local audit=require 'plugins.audit'
-local budget=require 'plugins.budget'
+local accounting=require 'core.accounting'
 local metrics=require 'plugins.observability'
 local settlement=require 'core.settlement'
 local observer=require 'core.response_observer'
 local M={}
-local zero={prompt_tokens=0,completion_tokens=0,total_tokens=0}
 function M.init()
     local cfg=config.load(); require('core.redis_client').init()
     M.plugins=require('core.plugin_manager').build(cfg.plugins,{
@@ -63,9 +62,9 @@ local function tools_from(content)
 end
 local function job(ctx,attempt,exact,status,code,final,obs)
     local content=obs and obs:content()
-    local source=exact and (attempt and attempt.unsent and 'system' or 'provider') or 'unknown'
+    local source=exact and 'provider' or 'unknown'
     local capture=(obs and (obs.invalid or obs.truncated) or status=='interrupted') and 'incomplete' or 'complete'
-    return {identity=ctx.identity,requested_model=ctx.requested_model,attempt=attempt,usage=exact,
+    return {identity=ctx.identity,requested_model=ctx.requested_model,attempt=attempt,usage=exact,measure=not (attempt and attempt.unsent),
         event=attempt and require('core.usage_event').new(ctx,attempt,exact,status,ngx.now()),
         audit=ctx.audit_prepared and {request_id=ctx.request_id,attempt_id=attempt and attempt.audit_started and attempt.attempt_id or nil,
             status=status,http_status=code,final=final,usage=exact or json.null,usage_source=source,
@@ -76,7 +75,6 @@ end
 local function record_attempt(ctx,attempt,exact,status,code,obs)
     local event=require('core.usage_event').new(ctx,attempt,exact,status,ngx.now())
     event.event='attempt.finished'; event.http_status=code
-    event.cost_micro_usd=exact and require('core.usage_event').cost(attempt.candidate,exact) or json.null
     metrics.log(event)
     local labels={model=ctx.requested_model,provider=attempt.candidate.provider,status=status}
     metrics.inc('gateway_attempts_total',labels)
@@ -98,10 +96,9 @@ function M.access(retry)
         end
         if not cfg.plugins.fallback or not allowed then return errors.exit(status,status==504 and 'upstream_timeout' or 'upstream_unavailable') end
         local previous=ctx.current; previous.unsent=true
-        record_attempt(ctx,previous,zero,'failed',status)
-        -- Release proven-unsent reservations before trying the next backend.
-        local ok=settlement.process(job(ctx,previous,zero,'failed',status,false))
-        if not ok then settlement.enqueue(job(ctx,previous,zero,'failed',status,false)) end
+        record_attempt(ctx,previous,nil,'failed',status)
+        local ok=settlement.process(job(ctx,previous,nil,'failed',status,false))
+        if not ok then settlement.enqueue(job(ctx,previous,nil,'failed',status,false)) end
         ctx.current=nil; ctx.fallback_count=ctx.fallback_count+1; context.save(ctx)
         metrics.inc('gateway_fallback_total',{model=ctx.requested_model})
     else
@@ -147,17 +144,13 @@ function M.start_attempt(ctx)
             from_key_ref=cfg.providers[from.provider].key_env,to_key_ref=cfg.providers[candidate.provider].key_env})
         ctx.transition=nil
     end
-    if cfg.plugins.usage_collector then
-        if not budget.begin(ctx,attempt) then attempt.keys=nil; context.save(ctx); return errors.exit(503,'accounting_unavailable') end
+    if cfg.plugins.user_quota then
+        if not accounting.begin(ctx,attempt) then attempt.keys=nil; context.save(ctx); return errors.exit(503,'accounting_unavailable') end
     end
     local body=unified.adapt(assert(json.decode(ngx.var.gw_body)),candidate,ctx.output_tokens)
     local started,status,code=audit.attempt(ctx,attempt,body)
     if not started then return errors.exit(status,code) end
     attempt.audit_started=audit.enabled(); context.save(ctx)
-    if attempt.keys then
-        local ok,err=budget.reserve(ctx,attempt); context.save(ctx)
-        if not ok then return errors.exit(err=='budget_exceeded' and 429 or 503,err or 'accounting_unavailable') end
-    end
     local provider=cfg.providers[candidate.provider]
     ctx.ip=resolve(provider.host)
     if not ctx.ip then return errors.exit(502,'upstream_dns_error') end
@@ -165,7 +158,7 @@ function M.start_attempt(ctx)
     ngx.var.gw_scheme=provider.scheme; ngx.var.gw_path=provider.path
     ngx.var.gw_host=provider.authority; ngx.var.gw_sni=provider.host; ngx.var.gw_auth='Bearer '..provider.key
     ngx.req.set_body_data(assert(json.encode(body)))
-    if attempt.keys and not budget.dispatch(attempt) then return errors.exit(503,'accounting_unavailable') end
+    if attempt.keys and not accounting.dispatch(attempt) then return errors.exit(503,'accounting_unavailable') end
     attempt.unsent=false; ctx.dispatched=true; context.save(ctx)
     ngx.ctx.observer=observer.new(ctx.stream,{json_max=cfg.usage.json_max_bytes,event_max=cfg.usage.sse_event_max_bytes,
         capture_max=cfg.audit.response_max_bytes_per_attempt})
@@ -217,7 +210,7 @@ function M.quota_proxy()
                 capture_max=cfg.audit.response_max_bytes_per_attempt})
             previous_observer:feed(prefix,true,ngx.now())
             attempt.unsent=connect_retry or false
-            local exact=connect_retry and zero or previous_observer.usage
+            local exact=connect_retry and nil or previous_observer.usage
             record_attempt(ctx,attempt,exact,'failed',res.status,previous_observer)
             local pending=job(ctx,attempt,exact,'failed',res.status,false,previous_observer)
             if not settlement.process(pending) then settlement.enqueue(pending) end
@@ -282,7 +275,7 @@ function M.log()
     local code=ngx.status; local status=code<400 and 'completed' or 'failed'
     if ctx.deadline_exceeded or ngx.var.request_completion~='OK' or (ctx.stream and obs and not obs.done) then status='interrupted' end
     local exact=obs and obs.usage
-    if attempt and attempt.unsent then exact=zero end
+    if attempt and attempt.unsent then exact=nil end
     if attempt then record_attempt(ctx,attempt,exact,status,code,obs) end
     settlement.enqueue(job(ctx,attempt,exact,status,code,true,obs))
     metrics.inc('gateway_requests_total',{model=ctx.requested_model,status=status})

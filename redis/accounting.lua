@@ -1,5 +1,5 @@
--- KEYS: attempt, pending zset, day, month, reservation, global, agent, model.
--- Each operation is an independent consumer transaction. No content is stored here.
+-- KEYS: attempt, pending zset, per-user/per-model day, per-user/per-model month.
+-- Provider usage is the only numeric Token source. No monetary state lives here.
 local a=cjson.decode(ARGV[1])
 local op=a.op
 local MAX=9007199254740991
@@ -8,7 +8,7 @@ local function number(v)
     if not n or n<0 or n>MAX or n~=math.floor(n) then error("invalid_integer") end
     return n
 end
-local function get(key, field) return number(redis.call("HGET",key,field) or "0") end
+local function get(key,field) return number(redis.call("HGET",key,field) or "0") end
 for i,key in ipairs(KEYS) do
     local kind=redis.call("TYPE",key).ok
     if kind~="none" and kind~=(i==2 and "zset" or "hash") then return redis.error_reply("invalid_key_type") end
@@ -19,73 +19,56 @@ local function meta() return cjson.decode(redis.call("HGET",KEYS[1],"meta")) end
 local function add(plan,key,field,amount)
     plan[key]=plan[key] or {}
     local nextval=(plan[key][field] or get(key,field))+amount
-    number(nextval)
-    plan[key][field]=nextval
+    number(nextval); plan[key][field]=nextval
 end
 local function apply(plan)
-    for key,fields in pairs(plan) do for field,value in pairs(fields) do redis.call("HSET",key,field,string.format("%.0f",value)) end end
-end
-local function cleanup(m)
-    local q=redis.call("HGET",KEYS[1],"quota_state")
-    local b=redis.call("HGET",KEYS[1],"budget_state")
-    if q=="known" and (b=="known" or b=="disabled") then
-        redis.call("ZREM",KEYS[2],KEYS[1])
-        redis.call("EXPIREAT",KEYS[1],m.dedupe_expiry)
-        if redis.call("EXISTS",KEYS[5])==1 then redis.call("EXPIREAT",KEYS[5],m.dedupe_expiry) end
+    for key,fields in pairs(plan) do
+        for field,value in pairs(fields) do redis.call("HSET",key,field,string.format("%.0f",value)) end
     end
+end
+local function close(m)
+    redis.call("ZREM",KEYS[2],KEYS[1]); redis.call("EXPIREAT",KEYS[1],m.dedupe_expiry)
 end
 if op=="begin" then
     if exists() then return {"exists"} end
     if redis.call("ZCARD",KEYS[2])>=number(a.max_pending) then return {"capacity"} end
     local m=a.meta; local plan={}
-    if m.quota_enabled then
-        add(plan,KEYS[3],"pending_attempts",1); add(plan,KEYS[4],"pending_attempts",1)
-    end
-    apply(plan)
-    redis.call("HSET",KEYS[1],"meta",cjson.encode(m),"quota_state",m.quota_enabled and "pending" or "known",
-        "budget_state",m.budget_enabled and "pending" or "disabled","dispatch","created")
+    add(plan,KEYS[3],"pending_attempts",1); add(plan,KEYS[4],"pending_attempts",1); apply(plan)
+    redis.call("HSET",KEYS[1],"meta",cjson.encode(m),"usage_state","pending","dispatch","created")
     redis.call("ZADD",KEYS[2],m.deadline,KEYS[1])
-    if m.quota_enabled then
-        redis.call("EXPIREAT",KEYS[3],m.day_expiry); redis.call("EXPIREAT",KEYS[4],m.month_expiry)
-    end
+    redis.call("EXPIREAT",KEYS[3],m.day_expiry); redis.call("EXPIREAT",KEYS[4],m.month_expiry)
     return {"created"}
 elseif op=="query" then
     return {redis.call("HGETALL",KEYS[3]),redis.call("HGETALL",KEYS[4])}
 end
 if not exists() then return {"missing"} end
 local m=meta()
-if op=="reserve" then
-    if not m.budget_enabled then return {"disabled"} end
+if op=="dispatch" then
     if redis.call("HGET",KEYS[1],"dispatch")~="created" or now>m.deadline then return {"closed"} end
-    if redis.call("EXISTS",KEYS[5])==1 then return {"exists"} end
-    local amount=number(a.amount); local plan={}
-    for _,i in ipairs(m.dimensions) do
-        local limit=number(m.limits[i-5]); local spent=get(KEYS[i],"spent"); local reserved=get(KEYS[i],"reserved")
-        if spent+reserved+amount>limit then return {"denied"} end
-        add(plan,KEYS[i],"reserved",amount)
-    end
-    apply(plan)
-    for _,i in ipairs(m.dimensions) do redis.call("HSET",KEYS[i],"limit",m.limits[i-5]) end
-    redis.call("HSET",KEYS[5],"amount",amount,"state","reserved")
-    return {"reserved"}
-elseif op=="dispatch" then
-    if redis.call("HGET",KEYS[1],"dispatch")~="created" or now>m.deadline then return {"closed"} end
-    if m.budget_enabled and redis.call("HGET",KEYS[5],"state")~="reserved" then return {"unreserved"} end
-    redis.call("HSET",KEYS[1],"dispatch","dispatching")
-    return {"dispatching"}
+    redis.call("HSET",KEYS[1],"dispatch","dispatching"); return {"dispatching"}
+elseif op=="unsent" then
+    local previous=redis.call("HGET",KEYS[1],"usage_state")
+    if previous=="unsent" then return {"duplicate"} end
+    if previous~="pending" then return {"conflict"} end
+    local plan={}
+    for i=3,4 do if now<(i==3 and m.day_expiry or m.month_expiry) then add(plan,KEYS[i],"pending_attempts",-1) end end
+    apply(plan); redis.call("HSET",KEYS[1],"usage_state","unsent","dispatch","closed"); close(m)
+    return {"unsent"}
 elseif op=="claim" then
     local due=tonumber(redis.call("ZSCORE",KEYS[2],KEYS[1]) or "0")
     if due>now then return {"busy"} end
     local dispatched=redis.call("HGET",KEYS[1],"dispatch")
     redis.call("HSET",KEYS[1],"dispatch","closed")
-    redis.call("ZADD",KEYS[2],now+60,KEYS[1])
-    return {dispatched=="created" and "unsent" or "unknown"}
-elseif op=="quota" then
-    if not m.quota_enabled then cleanup(m); return {"disabled"} end
-    if not a.reconcile and now>m.started_at+m.replay_max_days*86400 then return {"too_old"} end
-    local previous=redis.call("HGET",KEYS[1],"quota_state")
-    local known=a.usage~=cjson.null and type(a.usage)=="table"
-    local fingerprint="unknown"
+    if dispatched=="created" then
+        local plan={}
+        for i=3,4 do if now<(i==3 and m.day_expiry or m.month_expiry) then add(plan,KEYS[i],"pending_attempts",-1) end end
+        apply(plan); redis.call("HSET",KEYS[1],"usage_state","unsent"); close(m); return {"unsent"}
+    end
+    redis.call("ZADD",KEYS[2],now+60,KEYS[1]); return {"unknown"}
+elseif op=="settle" then
+    if now>m.started_at+m.replay_max_days*86400 then return {"too_old"} end
+    local previous=redis.call("HGET",KEYS[1],"usage_state")
+    local known=a.usage~=cjson.null and type(a.usage)=="table"; local fingerprint="unknown"
     if known then
         local p=number(a.usage.prompt_tokens); local c=number(a.usage.completion_tokens); local t=number(a.usage.total_tokens)
         if p+c~=t then return {"invalid_usage"} end
@@ -96,6 +79,8 @@ elseif op=="quota" then
         return {"conflict"}
     end
     if previous=="unknown" and not known then return {"duplicate"} end
+    if previous=="unknown" and known then return {"conflict"} end
+    if previous=="unsent" then return {"unsent"} end
     local plan={}
     for i=3,4 do
         local expiry=i==3 and m.day_expiry or m.month_expiry
@@ -108,34 +93,8 @@ elseif op=="quota" then
         end
     end
     apply(plan)
-    redis.call("HSET",KEYS[1],"quota_state",known and "known" or "unknown","usage_fingerprint",fingerprint)
+    redis.call("HSET",KEYS[1],"usage_state",known and "known" or "unknown","usage_fingerprint",fingerprint,"dispatch","closed")
     if known then redis.call("HSET",KEYS[1],"usage",cjson.encode(a.usage)) end
-    if a.reconcile then redis.call("HSET",KEYS[1],"reconciliation",a.evidence or "") end
-    cleanup(m)
-    return {"applied"}
-elseif op=="budget" then
-    if not m.budget_enabled then cleanup(m); return {"disabled"} end
-    if not a.reconcile and now>m.started_at+m.replay_max_days*86400 then return {"too_old"} end
-    local previous=redis.call("HGET",KEYS[1],"budget_state")
-    if a.cost==cjson.null or a.cost==nil then
-        if previous~="known" then redis.call("HSET",KEYS[1],"budget_state","unknown") end
-        return {"unknown"}
-    end
-    local cost=number(a.cost)
-    if previous=="known" then
-        if get(KEYS[1],"actual_cost")==cost then return {"duplicate"} end
-        return {"conflict"}
-    end
-    local reserved=get(KEYS[5],"amount")
-    if redis.call("EXISTS",KEYS[5])==0 and cost~=0 then return {"unreserved"} end
-    local plan={}
-    for _,i in ipairs(m.dimensions) do
-        add(plan,KEYS[i],"reserved",-reserved); add(plan,KEYS[i],"spent",cost)
-    end
-    apply(plan)
-    redis.call("HSET",KEYS[1],"budget_state","known","actual_cost",cost)
-    redis.call("HSET",KEYS[5],"state","settled","actual_cost",cost)
-    cleanup(m)
-    return {"applied",cost>reserved and "overrun" or "within_reservation"}
+    close(m); return {"applied"}
 end
 return redis.error_reply("unknown_operation")

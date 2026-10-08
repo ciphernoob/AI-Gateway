@@ -30,7 +30,7 @@ MODEL_KEY_PRIMARY=填写主Key
 MODEL_KEY_BACKUP=填写备用Key
 ```
 
-下面的片段应合并到现有配置，模型名、上下文上限、能力和价格按实际后端填写：
+下面的片段应合并到现有配置，模型名、上下文上限和能力按实际后端填写：
 
 ```yaml
 providers:
@@ -51,9 +51,6 @@ models:
         context_tokens: 4096
         max_output_tokens: 1024
         n_max: 1
-        input_rate: 1000000
-        output_rate: 2000000
-        price_version: example-v1
         capabilities: [stream, tools]
         supports_stream_usage: true
       - provider: backup
@@ -61,14 +58,11 @@ models:
         context_tokens: 4096
         max_output_tokens: 1024
         n_max: 1
-        input_rate: 1000000
-        output_rate: 2000000
-        price_version: example-v1
         capabilities: [stream, tools]
         supports_stream_usage: true
 ```
 
-如果继续保留 `local` 等逻辑模型，应同时保留其 Provider 和预算配置。`base_url` 为根路径，网关追加 `/v1/chat/completions`。不同环境变量解析为同一个 Key 时，不进行额度耗尽切换。
+如果继续保留 `local` 等逻辑模型，应同时保留其 Provider 配置。`base_url` 为根路径，网关追加 `/v1/chat/completions`。不同环境变量解析为同一个 Key 时，不进行额度耗尽切换。
 
 更新 `.env` 和 YAML 后，在 WSL 项目目录执行：
 
@@ -82,9 +76,9 @@ docker compose up -d --build --force-recreate --wait
 - 默认错误码列表只有 `insufficient_quota`。其他兼容服务可配置自己的明确额度耗尽码，如 `credits_empty`；不要将普通 `rate_limit_exceeded` 加入列表。
 - 不根据 HTTP 状态或错误 message 的文字猜测额度耗尽。普通限流、401、5xx、畸形/不完整/过大的错误不因该开关重试。
 - 成功 JSON/SSE 仍逐块转发；已经发送给客户端的响应不能切换或续写。流式中途的额度错误也不会跨模型拼接。
-- 备用须满足 stream/tools/输出上限等能力要求，且通过自己的预算和审计准入；额度耗尽不绕过网关预算。
+- 备用须满足 stream/tools/输出上限等能力要求，并通过审计准入。
 - 备用也耗尽时返回备用错误，不循环；没有不同 Key 的兼容备用时返回原错误。
-- 原失败尝试的有效 usage 仍会计费；缺失 usage 标记 unknown，保留预占供核对，不自动记零。
+- 原失败尝试的有效 Provider usage 仍按其模型计入 Token；缺失 usage 标记 unknown，不估算且不自动记零。
 - 当前没有持久 Key 冷却池，每个新请求仍从首选候选开始；此开关负责单次请求内的自动切换。
 
 开启时增加一个仅绑定容器 loopback 的 Nginx relay，由它以原生 `proxy_pass` 调用后端。Lua 在客户端收到响应前检查错误；成功内容按块透传，不缓冲完整成功流。8081 不对宿主机或容器网络开放。

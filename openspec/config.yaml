@@ -7,7 +7,7 @@ context: |
   Greenfield lightweight AI Gateway on OpenResty: Lua policies, native Nginx proxying,
   standalone Redis accounting, Prometheus metrics and Grafana dashboards.
   MVP M0-M4: API Key identity, OpenAI-compatible Chat Completions (JSON and SSE),
-  model registry, conservative fallback, shared Usage Collector, monetary budgets,
+  model registry, conservative fallback and a shared Usage Collector,
   plus opt-in structured quota-exhaustion fallback to a different configured Key/model
   before client output; this option defaults off and does not retry ordinary rate limits.
   per-user daily/monthly Token statistics and authenticated GET /v1/usage.
@@ -19,7 +19,9 @@ context: |
   with SQLite on a persistent volume; store metadata and payloads separately.
   Gateway-observed and Agent-reported events must be distinguishable.
   Audit data is not a billing source. Partial, truncated or missing capture is explicit.
-  Budget Engine uses integer monetary units, independent of User Quota Token counters.
+  Token accounting is keyed by trusted user and logical model. Only validated Provider
+  usage is counted; missing or invalid usage remains unknown and is never estimated or zeroed.
+  The gateway has no monetary price, budget, reservation, settlement or cost reporting.
   Token hard enforcement, quota reservation, intelligent routing and
   non-OpenAI native protocol conversion remain outside the original MVP.
   Separate change gateway-admin-console adds Go HTTPS 8443 + Vue administration,

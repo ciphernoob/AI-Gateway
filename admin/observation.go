@@ -54,6 +54,11 @@ func usageWindow(fields Obj, period string, limit any, expired bool) Obj {
 	}
 	return out
 }
+func addUsage(target, value Obj) {
+	for _, key := range []string{"prompt_tokens", "completion_tokens", "total_tokens", "pending_attempts", "unknown_attempts"} {
+		target[key] = number(target[key]) + number(value[key])
+	}
+}
 func (a *App) usageHTTP(w http.ResponseWriter, r *http.Request) {
 	d, id, e := a.active()
 	if e != nil {
@@ -84,6 +89,19 @@ func (a *App) usageHTTP(w http.ResponseWriter, r *http.Request) {
 	dayExpired := now.After(dt.AddDate(0, 0, 1+int(number(retention["daily_retention_days"]))))
 	monthExpired := now.After(mt.AddDate(0, 1, int(number(retention["monthly_retention_days"]))))
 	users := object(d.Config["users"])
+	models := object(d.Config["models"])
+	modelFilter := r.URL.Query().Get("model")
+	if modelFilter != "" && models[modelFilter] == nil {
+		fail(w, 404, "model_not_found")
+		return
+	}
+	modelIDs := []string{}
+	for model := range models {
+		if modelFilter == "" || model == modelFilter {
+			modelIDs = append(modelIDs, model)
+		}
+	}
+	sort.Strings(modelIDs)
 	ids := []string{}
 	filter := r.URL.Query().Get("user_id")
 	for uid := range users {
@@ -112,13 +130,34 @@ func (a *App) usageHTTP(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	items := []Obj{}
 	for _, uid := range ids {
-		v, err := client.Eval(ctx, `return {redis.call('HGETALL',KEYS[1]),redis.call('HGETALL',KEYS[2])}`, []string{"quota:usage:" + uid + ":" + day, "quota:usage:" + uid + ":" + month}).Slice()
+		keys := []string{}
+		for _, model := range modelIDs {
+			keys = append(keys, "quota:usage:"+uid+":"+model+":"+day, "quota:usage:"+uid+":"+model+":"+month)
+		}
+		v, err := client.Eval(ctx, `local out={};for i=1,#KEYS do out[i]=redis.call('HGETALL',KEYS[i]) end;return out`, keys).Slice()
 		if err != nil {
 			fail(w, 503, "redis_unavailable")
 			return
 		}
 		user := object(users[uid])
-		items = append(items, Obj{"user_id": uid, "disabled": user["disabled"] == true, "daily": usageWindow(hashResult(v[0]), day, user["daily_token_limit"], dayExpired), "monthly": usageWindow(hashResult(v[1]), month, user["monthly_token_limit"], monthExpired)})
+		var dailyLimit, monthlyLimit any
+		if modelFilter == "" {
+			dailyLimit = user["daily_token_limit"]
+			monthlyLimit = user["monthly_token_limit"]
+		}
+		dailyTotal, monthlyTotal := Obj{}, Obj{}
+		modelUsage := []Obj{}
+		for i, model := range modelIDs {
+			dailyFields, monthlyFields := hashResult(v[i*2]), hashResult(v[i*2+1])
+			addUsage(dailyTotal, dailyFields)
+			addUsage(monthlyTotal, monthlyFields)
+			modelUsage = append(modelUsage, Obj{"model": model,
+				"daily":   usageWindow(dailyFields, day, nil, dayExpired),
+				"monthly": usageWindow(monthlyFields, month, nil, monthExpired)})
+		}
+		items = append(items, Obj{"user_id": uid, "disabled": user["disabled"] == true, "models": modelUsage,
+			"daily":   usageWindow(dailyTotal, day, dailyLimit, dayExpired),
+			"monthly": usageWindow(monthlyTotal, month, monthlyLimit, monthExpired)})
 	}
 	reply(w, 200, Obj{"data": items, "total": total, "has_more": end < total, "timezone": "Asia/Shanghai", "enforcement": false, "consistency": "eventual", "config_revision": id})
 }
@@ -140,46 +179,14 @@ func (a *App) overview(w http.ResponseWriter, r *http.Request) {
 	defer c.Close()
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
-	budget := object(d.Config["budget"])
-	epoch := stringValue(budget["epoch"])
-	names := []string{"global"}
-	limits := []any{budget["global_limit"]}
-	models := object(budget["model_limits"])
-	sorted := []string{}
-	for m := range models {
-		sorted = append(sorted, m)
-	}
-	sort.Strings(sorted)
-	for _, m := range sorted {
-		names = append(names, "model:"+m)
-		limits = append(limits, models[m])
-	}
-	agents := object(budget["agent_limits"])
-	sorted = nil
-	for m := range agents {
-		sorted = append(sorted, m)
-	}
-	sort.Strings(sorted)
-	for _, m := range sorted {
-		names = append(names, "agent:"+m)
-		limits = append(limits, agents[m])
-	}
-	keys := []string{"usage:pending"}
-	for _, n := range names {
-		keys = append(keys, "budget:ledger:"+epoch+":"+n)
-	}
-	values, e := c.Eval(ctx, `local out={redis.call('ZCARD',KEYS[1])};for i=2,#KEYS do out[i]=redis.call('HGETALL',KEYS[i]) end;return out`, keys).Slice()
+	pending, e := c.ZCard(ctx, "usage:pending").Result()
 	if e != nil {
 		fail(w, 503, "redis_unavailable")
 		return
 	}
-	balances := []Obj{}
-	for i, n := range names {
-		fields := hashResult(values[i+1])
-		spent, reserved := number(fields["spent"]), number(fields["reserved"])
-		balances = append(balances, Obj{"dimension": n, "limit": limits[i], "spent": spent, "reserved": reserved, "remaining": max(int64(0), number(limits[i])-spent-reserved)})
-	}
-	reply(w, 200, Obj{"gateway": state, "redis": Obj{"healthy": true}, "config_revision": id, "pending_attempts": values[0], "budgets": balances, "currency": "USD", "money_unit": "micro_usd", "user_count": len(object(d.Config["users"])), "model_count": len(object(d.Config["models"]))})
+	reply(w, 200, Obj{"gateway": state, "redis": Obj{"healthy": true}, "config_revision": id,
+		"pending_attempts": pending, "accounting": "provider_tokens_only",
+		"user_count": len(object(d.Config["users"])), "model_count": len(object(d.Config["models"]))})
 }
 func (a *App) auditHTTP(w http.ResponseWriter, r *http.Request, path string) {
 	parts := strings.Split(path, "/")

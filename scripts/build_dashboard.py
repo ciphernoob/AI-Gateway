@@ -10,8 +10,6 @@ panels = [
     ('Request p95', 'histogram_quantile(0.95,sum(rate(gateway_request_seconds_bucket[5m])) by (le))'),
     ('TTFT p95', 'histogram_quantile(0.95,sum(rate(gateway_ttft_seconds_bucket[5m])) by (le))'),
     ('Tokens', 'sum(rate(gateway_tokens_total[5m])) by (direction)'),
-    ('Cost (micro USD)', 'sum(gateway_cost_micro_usd_total)'),
-    ('Budget remaining', 'gateway_budget_remaining_micro_usd'),
     ('Unsettled attempts', 'gateway_unsettled_attempts'),
     ('Audit queue bytes', 'sum(gateway_audit_queue_bytes)'),
     ('Settlement failures', 'sum(gateway_settlement_failures_total)'),

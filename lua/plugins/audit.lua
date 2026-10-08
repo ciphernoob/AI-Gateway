@@ -29,7 +29,7 @@ function M.prepare(ctx,body)
 end
 function M.attempt(ctx,attempt,body)
     return M.call("attempt",ctx.identity,{request_id=ctx.request_id,attempt_id=attempt.attempt_id,
-        provider=attempt.candidate.provider,model=attempt.candidate.model,price_version=attempt.candidate.price_version,
+        provider=attempt.candidate.provider,model=attempt.candidate.model,
         started_at=attempt.started_at,request=body})
 end
 return M

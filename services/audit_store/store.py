@@ -65,8 +65,6 @@ class Store:
             PRIMARY KEY(user_id,agent_id,execution_id));
           CREATE TABLE IF NOT EXISTS reads(id TEXT PRIMARY KEY, user_id TEXT NOT NULL, target TEXT NOT NULL,
             received REAL NOT NULL, result INTEGER NOT NULL, expires REAL NOT NULL);
-          CREATE TABLE IF NOT EXISTS reconciliations(id TEXT PRIMARY KEY, user_id TEXT NOT NULL,
-            attempt_id TEXT NOT NULL, stage TEXT NOT NULL, meta TEXT NOT NULL, received REAL NOT NULL, expires REAL NOT NULL);
           CREATE TABLE IF NOT EXISTS admin_redaction_revisions(revision TEXT PRIMARY KEY, expires REAL NOT NULL);
           CREATE TABLE IF NOT EXISTS admin_reads(id TEXT PRIMARY KEY, actor TEXT NOT NULL, target TEXT NOT NULL,
             received REAL NOT NULL, result INTEGER NOT NULL);
@@ -267,7 +265,7 @@ class Store:
         with self.transaction():
             row = self.owned_request(identity["user_id"], data["request_id"])
             require(row["agent_id"] == (identity.get("agent_id") or ""), 404, "not_found")
-            meta = {k: data.get(k) for k in ("provider", "model", "price_version", "started_at")}
+            meta = {k: data.get(k) for k in ("provider", "model", "started_at")}
             self.append(identity, row, data["attempt_id"] + ":started", "attempt.started", meta, data.get("request"), attempt_id=data["attempt_id"])
             self.db.execute("INSERT OR IGNORE INTO attempts VALUES(?,?,?,?)", (data["attempt_id"], row["id"], "prepared", canonical(self.redact(meta))))
             return {"ok": True}
@@ -301,7 +299,7 @@ class Store:
         with self.transaction():
             row = self.owned_request(identity["user_id"], data["request_id"])
             self.append(identity, row, data["attempt_id"] + ":usage:" + str(data.get("version", 1)), "usage.linked",
-                        {k: data.get(k) for k in ("usage", "cost", "usage_source", "version")}, attempt_id=data["attempt_id"])
+                        {k: data.get(k) for k in ("usage", "usage_source", "version")}, attempt_id=data["attempt_id"])
         return {"ok": True}
 
     def tool_event(self, identity, event):
@@ -349,27 +347,6 @@ class Store:
                 else:
                     self.db.execute("UPDATE executions SET terminal_event=?,terminal_type=? WHERE user_id=? AND agent_id=? AND execution_id=?", (event["event_id"], kind) + keys)
             return {"event_id": event["event_id"], "ingest_seq": seq, "persisted": True}, 201 if fresh else 200
-
-    def reconcile(self, identity, data):
-        require(data.get('stage') in ('prepared', 'applied'))
-        require(isinstance(data.get('reconciliation_id'), str) and re.fullmatch(r'[a-f0-9]{64}', data['reconciliation_id']))
-        with self.transaction():
-            eid = data['attempt_id'] + ':reconcile:' + data['reconciliation_id'] + ':' + data['stage']
-            meta = self.redact({k: data[k] for k in ('stage', 'usage', 'cost', 'evidence')})
-            encoded = canonical(meta)
-            old = self.db.execute('SELECT meta,user_id FROM reconciliations WHERE id=?', (eid,)).fetchone()
-            require(not old or (old['meta'] == encoded and old['user_id'] == identity['user_id']), 409, 'event_conflict')
-            self.db.execute('INSERT OR IGNORE INTO reconciliations VALUES(?,?,?,?,?,?,?)',
-                            (eid, identity['user_id'], data['attempt_id'], data['stage'], encoded, self.clock(),
-                             self.clock() + self.config['usage']['dedupe_retention_days'] * 86400))
-            # An unresolved ledger can outlive the 30-day request audit. Keep an
-            # independent operator receipt without resurrecting request content.
-            row = self.db.execute('SELECT * FROM requests WHERE id=? AND user_id=? AND expires>?',
-                                  (data['request_id'], identity['user_id'], self.clock())).fetchone()
-            if row:
-                self.append(identity, row, eid, 'usage.reconciliation', meta,
-                            source='operator_reconciled', attempt_id=data['attempt_id'])
-        return {'ok': True}
 
     def cursor(self, user, filters, position=None, token=None):
         key = self.policy["cursor_secret"].encode()
@@ -488,7 +465,6 @@ class Store:
             self.db.execute("DELETE FROM requests WHERE expires<=?", (now,))
             self.db.execute("DELETE FROM traces WHERE expires<=?", (now,))
             self.db.execute("DELETE FROM reads WHERE expires<=?", (now,))
-            self.db.execute("DELETE FROM reconciliations WHERE expires<=?", (now,))
 
     def close(self):
         self.db.close()

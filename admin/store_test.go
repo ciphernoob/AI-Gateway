@@ -174,6 +174,20 @@ func TestUsageUnknownAndRetention(t *testing.T) {
 		t.Fatal("expired reported zero")
 	}
 }
+func TestTokenOnlyDocumentRemovesMoneyFields(t *testing.T) {
+	d := Document{Config: Obj{"plugins": Obj{"budget": true, "user_quota": true}, "budget": Obj{"global_limit": 1},
+		"models": Obj{"coding": Obj{"candidates": []any{Obj{"provider": "p", "model": "m", "input_rate": 1, "output_rate": 2, "price_version": "v1"}}}}}}
+	d = tokenOnlyDocument(d)
+	if d.Config["budget"] != nil || object(d.Config["plugins"])["budget"] != nil {
+		t.Fatal("budget survived migration")
+	}
+	candidate := object(object(object(d.Config["models"])["coding"])["candidates"].([]any)[0])
+	for _, field := range []string{"input_rate", "output_rate", "price_version"} {
+		if candidate[field] != nil {
+			t.Fatal("money field survived", field)
+		}
+	}
+}
 func TestControlAuthenticationAndTraversal(t *testing.T) {
 	g := &Agent{token: "private", runtime: t.TempDir()}
 	w := httptest.NewRecorder()

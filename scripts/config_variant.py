@@ -13,16 +13,11 @@ def main():
         raw['fallback'] = {'on_key_quota_exhausted': variant != 'key_quota_off'}
         if variant == 'key_quota_same': raw['providers']['mock_b']['key_env'] = 'PROVIDER_KEY_A'
         if variant == 'key_quota_single': raw['request']['max_attempts'] = 1
-        if variant == 'key_quota_budget':
-            raw['models']['balanced']['candidates'][1]['input_rate'] = 1000000000
-            raw['budget']['model_limits']['balanced'] = 1000000
         if variant == 'key_quota_custom': raw['providers']['mock_a']['quota_exhaustion_codes'] = ['credits_empty']
     elif variant in ('fallback', 'both_down', 'single_attempt'):
         raw['providers']['mock_a']['base_url'] = 'http://mock-a:1'
         if variant == 'both_down': raw['providers']['mock_b']['base_url'] = 'http://mock-b:1'
         if variant == 'single_attempt': raw['request']['max_attempts'] = 1
-    elif variant == 'budget_denied':
-        raw['budget']['model_limits']['balanced'] = 0
     elif variant == 'quota_exceeded':
         raw['users']['user_001']['daily_token_limit'] = 0
     elif variant == 'metrics_off':

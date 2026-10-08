@@ -37,9 +37,9 @@ docker compose -f docker-compose.yml -f docker-compose.admin.yml up -d --build -
 ## 配置流程
 
 1. **后端密钥**：新增名称、服务根地址和 API Key。地址不要重复包含 `/v1`，页面显示最终请求路径。留空密钥表示保留原值；禁用的后端不参与候选，模型必须至少有一个启用候选才能发布。
-2. **模型服务**：建立逻辑名称、真实模型、计费价格、上下文与输出限制、能力和金额预算，最多两个候选。输入/输出价格使用 USD/百万 Token；金额预算使用 USD，最多六位小数，后端转换为整数 micro-USD。
-3. **用户管理**：新增用户、配置日/月 Token 统计额度，签发 Gateway Key；新 Key 仅展示一次，发布后生效。工具执行上报权限 `audit:write` 要求绑定 Agent ID。新 Agent 要填写金额预算。
-4. **配置发布**：保存公开地址、预算或额度切换开关；校验草稿，检查脱敏预览，再发布。界面中的配置表单均为草稿，运行版本以概览和版本列表为准。
+2. **模型服务**：建立逻辑名称、真实模型、上下文与输出限制及能力，最多两个候选；不配置价格或金额预算。
+3. **用户管理**：新增用户、配置日/月 Token 统计额度，签发 Gateway Key；新 Key 发布后生效；管理员可在 Gateway Keys 列表点击“查看”重新读取和复制，60 秒后自动隐藏，查看操作记录审计。工具执行上报权限 `audit:write` 要求绑定 Agent ID。
+4. **配置发布**：保存公开地址或额度切换开关；校验草稿，检查脱敏预览，再发布。界面中的配置表单均为草稿，运行版本以概览和版本列表为准。
 
 模型入口示例：
 
@@ -51,7 +51,7 @@ Authorization: Bearer <Gateway Key>
 
 SDK Base URL 为 `http://localhost:8080/models/coding/v1`，SDK 的 model 填 `coding`。独立路径可省略 body.model；提供时必须与路径一致。统一入口 `/v1/chat/completions` 保持原有行为。
 
-禁用用户会使其全部 Key 在发布后不可调用。撤销 Gateway Key、禁用后端以及额度切换开关同样采用发布机制。Token 配额只统计，不执行硬拦截；金额预算仍独立预占与结算。正常发布不切换预算 epoch，也不清零账本。
+禁用用户会使其全部 Key 在发布后不可调用。撤销 Gateway Key、禁用后端以及额度切换开关同样采用发布机制。Token 配额只统计，不执行硬拦截；系统没有金额预算、价格或费用账本。正常发布不清零 Token 账本。
 
 ## 发布、回滚与恢复
 
@@ -86,15 +86,15 @@ Nginx graceful reload 保留旧请求使用原配置。原有异步结算队列�
 | `GET /draft` | 获取配置草稿及 revision，不含密钥值 |
 | `PUT /providers/{id}` | 后端配置，可选 secret 更新密钥 |
 | `PUT /models/{id}`、`PUT /users/{id}` | 模型、用户草稿 |
-| `POST /keys`、`DELETE /keys/{key_ref}` | 一次性签发、撤销 Gateway Key |
-| `PUT /settings` | 公开地址、金额预算、额度切换开关 |
+| `POST /keys`、`DELETE /keys/{key_ref}` | 签发、撤销 Gateway Key |
+| `PUT /settings` | 公开地址、额度切换开关 |
 | `POST /validate`、`GET /preview` | 校验与发布预览，preview 可指定 version |
 | `POST /publish`、`GET /versions` | 发布、版本分页；publish 可指定 version 回滚 |
-| `GET /overview`、`GET /usage` | 实际运行状态、用量与预算 |
+| `GET /overview`、`GET /usage` | 实际运行状态、按用户和模型的 Token 用量 |
 | `GET /logs`、`GET /operations` | 运行日志、管理员操作审计 |
 | `GET /audit/requests`、`GET /audit/requests/{id}`、`GET /audit/traces/{id}` | 跨用户审计 |
 
-草稿写操作携带 `{revision,value}`；后端密钥另带 `secret`。发布携带 `{revision,version?}`。并发草稿冲突返回 409。分页默认 50、上限 100；审计详情沿用游标，其他查询使用 offset。用量参数支持 user_id、day（YYYY-MM-DD）、month（YYYY-MM），时区固定 Asia/Shanghai。
+草稿写操作携带 `{revision,value}`；后端密钥另带 `secret`。发布携带 `{revision,version?}`。并发草稿冲突返回 409。分页默认 50、上限 100；审计详情沿用游标，其他查询使用 offset。用量参数支持 user_id、model、day（YYYY-MM-DD）、month（YYYY-MM），时区固定 Asia/Shanghai。
 
 ## 验证
 
@@ -107,3 +107,5 @@ npm run test:e2e
 ```
 
 浏览器验收默认使用隔离项目 `ai-gateway-admin-test`，管理端口 18443、网关端口 18081。`python -m tests.admin_acceptance` 会停止依赖、注入 Nginx 错误并重启该测试项目，严格只针对该命名项目。它不应指向生产服务。原网关回归仍使用 `bash scripts/test.sh`。
+
+管理员通过 `POST /admin/api/v1/keys/{key_ref}/reveal` 查看 Gateway Key；接口要求管理员会话和 CSRF，禁止缓存，审计失败不返回明文。已撤销 Key 也可查看，但不会重新启用。后端 API Key 不支持查看。

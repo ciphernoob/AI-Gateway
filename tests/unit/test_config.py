@@ -62,7 +62,7 @@ class ConfigurationTests(unittest.TestCase):
             yaml.load('!!python/object/apply:os.system [echo unsafe]', Loader=UniqueLoader)
 
     def test_independent_optional_plugins_and_multiple_keys(self):
-        for flag in ['budget', 'user_quota', 'fallback', 'observability', 'audit']:
+        for flag in ['user_quota', 'fallback', 'observability', 'audit']:
             raw = copy.deepcopy(self.raw); raw['plugins'][flag] = False
             if flag == 'audit': raw['audit']['mode'] = 'off'
             validate(raw, self.env)

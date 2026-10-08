@@ -15,7 +15,9 @@ import yaml
 SAFE_INT = 2**53 - 1
 ID = re.compile(r"^[A-Za-z0-9_-]{1,80}$")
 SCOPES = {"chat:write", "usage:read", "audit:read", "audit:write"}
-PLUGINS = {"identity", "unified_api", "fallback", "usage_collector", "budget", "user_quota", "observability", "audit"}
+PLUGINS = {"identity", "unified_api", "fallback", "usage_collector", "user_quota", "observability", "audit"}
+ROOT_FIELDS = {"version", "fallback", "timezone", "plugins", "request", "redis", "users", "api_keys",
+               "providers", "models", "usage", "audit"}
 
 
 class ConfigError(ValueError):
@@ -84,6 +86,7 @@ def validate(raw, environment=None):
 
     try:
         require(c["version"] == 1 and c["timezone"] == "Asia/Shanghai", "version/timezone")
+        require(set(c) <= ROOT_FIELDS and ROOT_FIELDS - {"fallback"} <= set(c), "root fields")
         flags = c["plugins"]
         require(set(flags) == PLUGINS and all(type(v) is bool for v in flags.values()), "plugins")
         require(flags["identity"] and flags["unified_api"], "plugins.identity/unified_api")
@@ -91,7 +94,7 @@ def validate(raw, environment=None):
         require(isinstance(fallback, dict) and not set(fallback) - {'on_key_quota_exhausted'}, 'fallback')
         fallback.setdefault('on_key_quota_exhausted', False)
         require(type(fallback['on_key_quota_exhausted']) is bool, 'fallback.on_key_quota_exhausted')
-        require(not (flags["budget"] or flags["user_quota"] or flags["audit"]) or flags["usage_collector"], "plugins.usage_collector")
+        require(not (flags["user_quota"] or flags["audit"]) or flags["usage_collector"], "plugins.usage_collector")
         r = c["request"]
         for name in ("max_bytes", "connect_timeout_ms", "read_timeout_ms", "total_timeout_ms", "default_output_tokens"):
             integer(r[name], "request." + name, 1)
@@ -144,32 +147,18 @@ def validate(raw, environment=None):
             identifier(name, "models.id")
             require(1 <= len(model["candidates"]) <= 2, "models.candidates")
             for candidate in model["candidates"]:
+                require(set(candidate) == {"provider", "model", "context_tokens", "max_output_tokens", "n_max",
+                                           "capabilities", "supports_stream_usage"}, "models.candidate fields")
                 require(candidate["provider"] in c["providers"], "models.provider")
                 require(isinstance(candidate["model"], str) and 0 < len(candidate["model"]) <= 200, "models.model")
                 for k in ("context_tokens", "max_output_tokens", "n_max"):
                     integer(candidate[k], "models." + k, 1)
-                for k in ("input_rate", "output_rate"):
-                    integer(candidate[k], "models." + k)
-                identifier(candidate["price_version"], "models.price_version")
                 require(type(candidate["supports_stream_usage"]) is bool, "models.supports_stream_usage")
                 require(isinstance(candidate["capabilities"], list) and set(candidate["capabilities"]) <= {"stream", "tools"}, "models.capabilities")
                 require(r["default_output_tokens"] <= candidate["max_output_tokens"], "request.default_output_tokens")
-                integer((candidate["context_tokens"] * candidate["input_rate"] + candidate["max_output_tokens"] * candidate["output_rate"]) * candidate["n_max"], "models.price_product")
             model["candidates"] = [x for x in model["candidates"] if not c["providers"][x["provider"]].get("disabled", False)]
             require(bool(model["candidates"]), "models.enabled_candidates")
         require(bool(c["models"]), "models")
-        b = c["budget"]
-        require(b["currency"] == "USD", "budget.currency")
-        identifier(b["epoch"], "budget.epoch")
-        integer(b["global_limit"], "budget.global_limit")
-        for name, limit in b["model_limits"].items():
-            require(name in c["models"], "budget.model_limits")
-            integer(limit, "budget.model_limits.limit")
-        require(set(b["model_limits"]) == set(c["models"]), "budget.model_limits")
-        agents = {k.get("agent_id") for k in c["api_keys"] if k.get("agent_id")}
-        require(set(b["agent_limits"]) == agents, "budget.agent_limits")
-        for limit in b["agent_limits"].values():
-            integer(limit, "budget.agent_limits.limit")
         u = c["usage"]
         for name, value in u.items():
             integer(value, "usage." + name, 1)

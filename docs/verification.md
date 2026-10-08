@@ -1,4 +1,6 @@
-# 实施验收与 OpenSpec 核对
+# 历史实施验收与 OpenSpec 核对
+
+> 本文记录 `openresty-ai-gateway-mvp` 原始实现时的历史验收，其中金额预算相关内容已由 `token-only-accounting` 变更废止。当前行为以 README、运行手册及该变更的 specs 为准。
 
 日期：2026-09-24。变更：`openresty-ai-gateway-mvp`，schema：spec-driven。
 

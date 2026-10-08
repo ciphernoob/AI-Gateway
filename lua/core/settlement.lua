@@ -1,6 +1,6 @@
 local json=require "cjson.safe"
 local config=require "core.config"
-local budget=require "plugins.budget"
+local accounting=require "core.accounting"
 local audit=require "plugins.audit"
 local metrics=require "plugins.observability"
 local redis=require "core.redis_client"
@@ -19,23 +19,22 @@ function M.process(job)
     end
     local ok,details=true,{}
     if job.attempt and job.attempt.keys then
-        ok,details=budget.settle(job.attempt,job.usage)
+        if job.attempt.unsent then ok=accounting.unsent(job.attempt); details={status="unsent"}
+        elseif job.measure~=false then ok,details=accounting.settle(job.attempt,job.usage) end
         if not ok then return false end
         local labels={model=job.requested_model,provider=job.attempt.candidate.provider}
-        if details.quota=="applied" and job.usage then
+        if details.status=="applied" and job.usage then
             labels.direction="input"; metrics.inc("gateway_tokens_total",labels,job.usage.prompt_tokens)
             labels.direction="output"; metrics.inc("gateway_tokens_total",labels,job.usage.completion_tokens)
             labels.direction=nil
         end
-        if details.budget=="applied" then metrics.inc("gateway_cost_micro_usd_total",labels,details.cost or 0) end
-        if details.overrun then metrics.inc("gateway_budget_overruns_total",labels) end
     end
     if job.audit and audit.enabled() then
         local result=audit.call("finish",job.identity,job.audit)
         if not result then return false end
-        if job.attempt and job.attempt.keys and job.attempt.audit_started then
+        if job.attempt and job.attempt.audit_started and job.measure~=false then
             result=audit.call("usage",job.identity,{request_id=job.audit.request_id,attempt_id=job.attempt.attempt_id,
-                usage=job.usage,cost=details.cost,usage_source=job.audit.usage_source,version=1})
+                usage=job.usage,usage_source=job.audit.usage_source,version=1})
             if not result then return false end
         end
     end
@@ -76,21 +75,10 @@ function M.recover(premature)
                 local meta=json.decode(raw)
                 local claim=redis.eval(meta.keys,{op="claim",now=math.floor(ngx.now())})
                 if claim and claim[1]~="busy" then
-                    local exact
                     local saved=client:hget(key,"usage")
-                    if type(saved)=="string" then exact=json.decode(saved)
-                    elseif claim[1]=="unsent" then exact={prompt_tokens=0,completion_tokens=0,total_tokens=0} end
-                    budget.settle({keys=meta.keys,candidate=meta.candidate},exact)
+                    if claim[1]~="unsent" then accounting.settle({keys=meta.keys},type(saved)=="string" and json.decode(saved) or nil) end
                 end
             end
-        end
-    end
-    local cfg=config.get()
-    for logical in pairs(cfg.models) do
-        local values=client:hmget("budget:ledger:"..cfg.budget.epoch..":model:"..logical,"spent","reserved")
-        if values then
-            local spent=tonumber(values[1]) or 0; local reserved=tonumber(values[2]) or 0
-            metrics.set("gateway_budget_remaining_micro_usd",{model=logical},math.max(cfg.budget.model_limits[logical]-spent-reserved,0))
         end
     end
     metrics.set("gateway_unsettled_attempts",nil,tonumber(client:zcard("usage:pending")) or 0)

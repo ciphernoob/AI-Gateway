@@ -158,7 +158,7 @@
     },
     {
       "id": 8,
-      "title": "Cost (micro USD)",
+      "title": "Unsettled attempts",
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
@@ -167,48 +167,6 @@
       "gridPos": {
         "x": 8,
         "y": 14,
-        "w": 8,
-        "h": 7
-      },
-      "targets": [
-        {
-          "expr": "sum(gateway_cost_micro_usd_total)",
-          "refId": "A"
-        }
-      ]
-    },
-    {
-      "id": 9,
-      "title": "Budget remaining",
-      "type": "timeseries",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "gridPos": {
-        "x": 16,
-        "y": 14,
-        "w": 8,
-        "h": 7
-      },
-      "targets": [
-        {
-          "expr": "gateway_budget_remaining_micro_usd",
-          "refId": "A"
-        }
-      ]
-    },
-    {
-      "id": 10,
-      "title": "Unsettled attempts",
-      "type": "timeseries",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "gridPos": {
-        "x": 0,
-        "y": 21,
         "w": 8,
         "h": 7
       },
@@ -220,7 +178,7 @@
       ]
     },
     {
-      "id": 11,
+      "id": 9,
       "title": "Audit queue bytes",
       "type": "timeseries",
       "datasource": {
@@ -228,8 +186,8 @@
         "uid": "prometheus"
       },
       "gridPos": {
-        "x": 8,
-        "y": 21,
+        "x": 16,
+        "y": 14,
         "w": 8,
         "h": 7
       },
@@ -241,7 +199,7 @@
       ]
     },
     {
-      "id": 12,
+      "id": 10,
       "title": "Settlement failures",
       "type": "timeseries",
       "datasource": {
@@ -249,7 +207,7 @@
         "uid": "prometheus"
       },
       "gridPos": {
-        "x": 16,
+        "x": 0,
         "y": 21,
         "w": 8,
         "h": 7
@@ -262,7 +220,7 @@
       ]
     },
     {
-      "id": 13,
+      "id": 11,
       "title": "Audit failures",
       "type": "timeseries",
       "datasource": {
@@ -270,8 +228,8 @@
         "uid": "prometheus"
       },
       "gridPos": {
-        "x": 0,
-        "y": 28,
+        "x": 8,
+        "y": 21,
         "w": 8,
         "h": 7
       },
@@ -283,7 +241,7 @@
       ]
     },
     {
-      "id": 14,
+      "id": 12,
       "title": "Incomplete audits",
       "type": "timeseries",
       "datasource": {
@@ -291,8 +249,8 @@
         "uid": "prometheus"
       },
       "gridPos": {
-        "x": 8,
-        "y": 28,
+        "x": 16,
+        "y": 21,
         "w": 8,
         "h": 7
       },

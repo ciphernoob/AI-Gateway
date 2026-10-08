@@ -19,7 +19,7 @@ for line in raw.splitlines():
     if isinstance(event, dict) and event.get('event') in ('attempt.finished', 'request.finished'):
         assert not {'messages', 'content', 'arguments', 'tool_calls', 'response', 'request_body'} & event.keys()
         if event['event'] == 'attempt.finished':
-            assert {'request_id', 'trace_id', 'attempt_id', 'usage_source', 'usage_status', 'cost_micro_usd', 'price_version'} <= event.keys()
+            assert {'request_id', 'trace_id', 'attempt_id', 'usage_source', 'usage_status', 'model', 'actual_model'} <= event.keys()
         events.append(event)
     if isinstance(event, dict) and event.get('event') == 'fallback.selected':
         assert {'reason','request_id','trace_id','from_attempt_id','to_attempt_id','from_key_ref','to_key_ref','from_model','to_model'} <= event.keys()

@@ -29,9 +29,6 @@ def main():
         result,counts=invoke('quota')
         assert result[0]==429 and counts==[1,0],(result,counts)
         assert result[2]['error']['code']=='insufficient_quota'
-    elif variant=='key_quota_budget':
-        result,counts=invoke('quota_usage')
-        assert result[0]==429 and result[2]['error']['code']=='budget_exceeded' and counts==[1,0],(result,counts)
     elif variant=='key_quota_custom':
         result,counts=invoke('custom_quota')
         assert result[0]==200 and counts==[1,1]

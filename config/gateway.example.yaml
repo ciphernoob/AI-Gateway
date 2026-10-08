@@ -7,7 +7,6 @@ plugins:
   unified_api: true
   fallback: true
   usage_collector: true
-  budget: true
   user_quota: true
   observability: true
   audit: true
@@ -48,9 +47,6 @@ models:
         context_tokens: 4096
         max_output_tokens: 1024
         n_max: 4
-        input_rate: 1000000
-        output_rate: 2000000
-        price_version: test-v1
         capabilities: [stream, tools]
         supports_stream_usage: true
       - &b
@@ -59,19 +55,10 @@ models:
         context_tokens: 4096
         max_output_tokens: 1024
         n_max: 4
-        input_rate: 1000000
-        output_rate: 2000000
-        price_version: test-v1
         capabilities: [stream, tools]
         supports_stream_usage: true
   local:
     candidates: [*b]
-budget:
-  currency: USD
-  epoch: mvp-v1
-  global_limit: 100000000
-  agent_limits: {agent_001: 50000000}
-  model_limits: {balanced: 50000000, local: 50000000}
 usage:
   json_max_bytes: 4194304
   sse_event_max_bytes: 262144

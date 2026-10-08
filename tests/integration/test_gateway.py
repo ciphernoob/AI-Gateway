@@ -5,7 +5,6 @@ import unittest
 import runpy
 from unittest.mock import patch
 from pathlib import Path
-from scripts.reconcile import reconcile
 from urllib.request import Request, urlopen
 from tests.helpers import http, eventually
 
@@ -150,23 +149,6 @@ class GatewayTests(unittest.TestCase):
         self.assertIn('gateway_requests_total', value)
         for forbidden in ['user_id=', 'agent_id=', 'request_id=', 'attempt_id=', 'trace_id=', self.key]:
             self.assertNotIn(forbidden, value)
-
-    def test_operator_reconciliation_is_audited_and_idempotent(self):
-        http('http://mock-a:8000/control', {'mode': 'no_usage'})
-        status, headers, _ = self.chat()
-        self.assertEqual(200, status)
-        self.detail(headers['X-Request-ID'])
-        cfg = json.loads(Path('/runtime/config.json').read_text())
-        exact = dict(prompt_tokens=12, completion_tokens=5, total_tokens=17)
-        first = reconcile(cfg, headers['X-Attempt-ID'], exact, 'mock-provider-invoice-001')
-        self.assertEqual('applied', first['quota'])
-        second = reconcile(cfg, headers['X-Attempt-ID'], exact, 'mock-provider-invoice-001')
-        self.assertEqual('duplicate', second['quota'])
-        self.assertEqual('duplicate', second['budget'])
-        detail = self.detail(headers['X-Request-ID'])
-        receipts = [e for e in detail['events'] if e['type'] == 'usage.reconciliation']
-        self.assertEqual(2, len(receipts))
-        self.assertEqual('operator_reconciled', receipts[0]['source'])
 
     def test_documented_agent_example(self):
         with patch.dict(os.environ, {'GATEWAY_URL': BASE, 'GATEWAY_API_KEY': self.key}):

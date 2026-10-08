@@ -107,15 +107,13 @@ func (a *App) mutate(w http.ResponseWriter, r *http.Request, path string) {
 		}
 		object(doc.Config["users"])[id] = b.Value
 	case "models":
-		if id == "" || !only(b.Value, "candidates budget_limit") {
+		if id == "" || !only(b.Value, "candidates") {
 			fail(w, 400, "invalid_model")
 			return
 		}
 		models := object(doc.Config["models"])
-		limits := object(object(doc.Config["budget"])["model_limits"])
 		if r.Method == "DELETE" {
 			delete(models, id)
-			delete(limits, id)
 		} else {
 			list, ok := b.Value["candidates"].([]any)
 			if !ok || len(list) < 1 || len(list) > 2 {
@@ -123,22 +121,17 @@ func (a *App) mutate(w http.ResponseWriter, r *http.Request, path string) {
 				return
 			}
 			for _, c := range list {
-				if !only(object(c), "provider model context_tokens max_output_tokens n_max input_rate output_rate price_version capabilities supports_stream_usage") {
+				if !only(object(c), "provider model context_tokens max_output_tokens n_max capabilities supports_stream_usage") {
 					fail(w, 400, "invalid_candidate")
 					return
 				}
 			}
-			if _, ok := b.Value["budget_limit"]; !ok {
-				fail(w, 400, "budget_required")
-				return
-			}
-			limits[id] = b.Value["budget_limit"]
 			models[id] = Obj{"candidates": list}
 		}
 	case "keys":
 		keys, _ := doc.Config["api_keys"].([]any)
 		if id == "" && r.Method == "POST" {
-			if !only(b.Value, "user_id agent_id scopes agent_budget") {
+			if !only(b.Value, "user_id agent_id scopes") {
 				fail(w, 400, "invalid_key")
 				return
 			}
@@ -161,16 +154,7 @@ func (a *App) mutate(w http.ResponseWriter, r *http.Request, path string) {
 					fail(w, 400, "invalid_agent")
 					return
 				}
-				limits := object(object(doc.Config["budget"])["agent_limits"])
-				if _, exists := limits[agent]; !exists {
-					if b.Value["agent_budget"] == nil {
-						fail(w, 400, "agent_budget_required")
-						return
-					}
-					limits[agent] = b.Value["agent_budget"]
-				}
 			}
-			delete(b.Value, "agent_budget")
 			keys = append(keys, b.Value)
 		} else if r.Method == "DELETE" && id != "" {
 			found := false
@@ -191,7 +175,7 @@ func (a *App) mutate(w http.ResponseWriter, r *http.Request, path string) {
 		}
 		doc.Config["api_keys"] = keys
 	case "settings":
-		if id != "" || !only(b.Value, "public_url fallback global_limit agent_limits") {
+		if id != "" || !only(b.Value, "public_url fallback") {
 			fail(w, 400, "invalid_settings")
 			return
 		}
@@ -203,13 +187,6 @@ func (a *App) mutate(w http.ResponseWriter, r *http.Request, path string) {
 		doc.PublicURL = strings.TrimRight(u, "/")
 		if v, ok := b.Value["fallback"]; ok {
 			doc.Config["fallback"] = v
-		}
-		budget := object(doc.Config["budget"])
-		if v, ok := b.Value["global_limit"]; ok {
-			budget["global_limit"] = v
-		}
-		if v, ok := b.Value["agent_limits"]; ok {
-			budget["agent_limits"] = v
 		}
 	default:
 		fail(w, 404, "not_found")

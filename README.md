@@ -1,8 +1,8 @@
 # OpenResty AI Gateway
 
-可运行的轻量级 MVP：统一 Chat Completions（JSON/SSE/tools）、保守 Fallback、金额预算、用户 Token 统计、调用审计和 Prometheus 指标。请求由 Nginx 原生 `proxy_pass` 转发，Lua 实现策略；Redis 管理额度，独立 Python/SQLite Audit Store 保存脱敏内容。
+可运行的轻量级 MVP：统一 Chat Completions（JSON/SSE/tools）、保守 Fallback、按用户和逻辑模型统计 Provider Token、调用审计和 Prometheus 指标。请求由 Nginx 原生 `proxy_pass` 转发，Lua 实现策略；Redis 管理 Token 账本，独立 Python/SQLite Audit Store 保存脱敏内容。
 
-已实现主链路，OpenSpec 变更仍处于实施/验收状态，未归档。完整任务和未验证边界见 [实施任务](openspec/changes/openresty-ai-gateway-mvp/tasks.md)、[验收报告](docs/verification.md)。用户 Token 硬限额属于后续 M5；当前 `enforcement=false`，金额预算会拦截。
+已实现主链路，OpenSpec 变更仍处于实施/验收状态，未归档。当前只将 LLM 后端明确返回且通过校验的 usage 计入 Token；缺失或非法 usage 标记 unknown，不估算且不记零。用户 Token 硬限额属于后续 M5，当前 `enforcement=false`。
 
 ## 启动
 
@@ -38,7 +38,7 @@ curl http://localhost:8080/v1/usage \
 
 | 接口 | 权限与用途 |
 | --- | --- |
-| `GET /v1/usage` | `usage:read`；本人日/月 Token、剩余、pending/unknown |
+| `GET /v1/usage` | `usage:read`；本人按模型拆分及汇总的日/月 Token、剩余、pending/unknown |
 | `GET /v1/audit/requests` | `audit:read`；本人请求列表，支持 model/status/from/to/limit/cursor |
 | `GET /v1/audit/requests/{request_id}` | 本人事件详情；`include_content=true` 显式读取正文 |
 | `GET /v1/audit/traces/{trace_id}` | 本人多轮请求列表 |
@@ -46,7 +46,7 @@ curl http://localhost:8080/v1/usage \
 
 查询时间过滤使用 Unix 秒；分页返回 `next_cursor`，必须携带原过滤参数继续查询。事件页最多 100 条并有字节上限。工具/执行摘要最多 100 项，截断有显式标志；完整历史通过事件分页获取。
 
-网关能观察 `tool_calls`，工具实际执行由 Agent 上报 `tool.started/completed/failed`，来源标为 `agent_reported`；未上报显示 `not_reported`。上报不会改变模型 Token 或费用。API Key 决定可信 user/agent，客户端不能指定或冒用主体。
+网关能观察 `tool_calls`，工具实际执行由 Agent 上报 `tool.started/completed/failed`，来源标为 `agent_reported`；未上报显示 `not_reported`。上报不会改变模型 Token。API Key 决定可信 user/agent，客户端不能指定或冒用主体。
 
 ```bash
 export GATEWAY_API_KEY=gw-test-user1-key-0000000000000001

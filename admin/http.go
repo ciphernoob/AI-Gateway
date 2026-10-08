@@ -126,6 +126,8 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		a.logsHTTP(w, r)
 	case path == "/operations" && r.Method == "GET":
 		a.operationsHTTP(w, r)
+	case strings.HasPrefix(path, "/keys/") && strings.HasSuffix(path, "/reveal") && r.Method == "POST":
+		a.revealGatewayKey(w, r, strings.TrimSuffix(strings.TrimPrefix(path, "/keys/"), "/reveal"))
 	case strings.HasPrefix(path, "/audit/") && r.Method == "GET":
 		a.auditHTTP(w, r, strings.TrimPrefix(path, "/audit/"))
 	case r.Method == "PUT" || r.Method == "POST" || r.Method == "DELETE":

@@ -2,7 +2,7 @@ local json=require 'cjson.safe'
 local observer=require 'core.response_observer'
 local usage=require 'core.usage_event'
 local fallback=require 'plugins.fallback'
-local budget=require 'plugins.budget'
+local accounting=require 'core.accounting'
 local config=require 'core.config'
 local identity=require 'plugins.identity'
 local unified=require 'plugins.unified_api'
@@ -36,12 +36,12 @@ for _,bad in ipairs({{prompt_tokens=-1,completion_tokens=0,total_tokens=-1},
     {prompt_tokens=9007199254740992,completion_tokens=0,total_tokens=9007199254740992}}) do assert(not usage.validate(bad)) end
 assert(usage.validate({prompt_tokens=0,completion_tokens=0,total_tokens=0}))
 local eventctx={request_id='req_1',trace_id='trace_1',identity={user_id='user_1'},requested_model='logical'}
-local eventattempt={attempt_id='attempt_1',candidate={model='real',provider='p',price_version='v1'},started_at=1,unsent=false}
+local eventattempt={attempt_id='attempt_1',candidate={model='real',provider='p'},started_at=1,unsent=false}
 local event=usage.new(eventctx,eventattempt,u,'completed',2); assert(usage.validate_event(event))
 event=usage.new(eventctx,eventattempt,nil,'interrupted',2); assert(usage.validate_event(event) and event.total_tokens==json.null)
 eventattempt.unsent=true
-event=usage.new(eventctx,eventattempt,{prompt_tokens=0,completion_tokens=0,total_tokens=0},'failed',2)
-assert(usage.validate_event(event) and event.usage_source=='system')
+event=usage.new(eventctx,eventattempt,nil,'failed',2)
+assert(usage.validate_event(event) and event.usage_source=='unknown')
 event.total_tokens=1; assert(not usage.validate_event(event))
 local cfg=config.load()
 local who=identity.authenticate('Bearer gw-test-user1-key-0000000000000001',cfg.api_keys,'chat:write')
@@ -61,16 +61,14 @@ cfg.models.balanced.candidates[2].capabilities={}
 assert(not unified.validate(request,cfg))
 assert(not unified.validate({model='balanced',messages={{role='forged',content='hi'}}},cfg))
 assert(not unified.validate({model='balanced',messages={{role='user',content='hi'}},n=1.5},cfg))
-local candidate={input_rate=1,output_rate=1,context_tokens=100}
-assert(usage.cost(candidate,{prompt_tokens=1,completion_tokens=0,total_tokens=1})==1)
-local day,month=budget.periods(1790784000) -- 2026-10-01 00:00 Asia/Shanghai
+local day,month=accounting.periods(1790784000) -- 2026-10-01 00:00 Asia/Shanghai
 assert(day=='2026-10-01' and month=='2026-10')
 local state={status=502,sent='0',received='0',header_time='-',headers_sent=false,count=1,max_attempts=2,has_candidate=true,now=1,deadline=2}
 assert(fallback.allowed(state))
 for key,value in pairs({sent='1',received='1',header_time='0.1',headers_sent=true,count=2,has_candidate=false,now=3,status=429}) do
     local copy={}; for k,v in pairs(state) do copy[k]=v end; copy[key]=value; assert(not fallback.allowed(copy))
 end
-print('PASS Lua SSE/UTF-8/multiline/limits/usage/rounding/period/identity/capabilities/fallback checks')
+print('PASS Lua SSE/UTF-8/multiline/limits/provider-usage/period/identity/capabilities/fallback checks')
 local original_log=ngx.log
 local captured
 ngx.log=function(_,value) captured=value end
